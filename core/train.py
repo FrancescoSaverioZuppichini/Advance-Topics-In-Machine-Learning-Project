@@ -13,6 +13,9 @@ from torchvision.transforms import *
 import torchvision.transforms.functional as TF
 from sklearn.metrics import roc_auc_score, roc_curve
 
+import seaborn as sns
+import matplotlib.pyplot as plt
+
 BATCH_SIZE = 128
 N_WORKERS = 14
 H5_PATH = '/home/francesco/Desktop/carino/vaevictis/data_many_dist_fixed_step.h5'
@@ -46,10 +49,6 @@ class PerceptionDataset(Dataset):
             self.length += len(el)
 
     def __getitem__(self, item):
-        g_len = self.length // len(self.X)
-
-        g = len(self.X) - (self.length // (g_len + 1))
-
         x = self.X[item]
         y = self.Y[item]
 
@@ -110,22 +109,20 @@ def get_dl(*args, **kwargs):
 
     return dl
 
-if TRAIN: train_dl = get_dl(np.arange(2, 8), H5_PATH, test=False)
 
 model = SimpleCNN().to(device)
 
 criterion = nn.MSELoss()
 optimizer = optim.Adam(model.parameters(), lr=0.0002)
 
-if TRAIN:
-    # TRAIN
+def run(dl, train=False):
     for epoch in range(EPOCHES):
         tot_loss = torch.zeros(1).to(device)
-        bar = tqdm.tqdm(enumerate(train_dl))
+        bar = tqdm.tqdm(enumerate(dl))
 
         for n_batch, (x, y) in bar:
 
-            optimizer.zero_grad()
+            if train: optimizer.zero_grad()
 
             x, y = x.to(device), y.to(device)
 
@@ -135,27 +132,29 @@ if TRAIN:
             y_ = model(x)
             loss = criterion(y_ * mask, y * mask)
 
-            loss.backward()
-
-            optimizer.step()
+            if train:
+                loss.backward()
+                optimizer.step()
 
             with torch.no_grad():
                 tot_loss += loss
 
             bar.set_description('epoch={}, loss={:.4f}'.format(epoch, (tot_loss / (n_batch + 1)).cpu().item()))
-
+if TRAIN:
+    train_dl = get_dl(np.arange(2, 8), H5_PATH, test=False)
+    run(train_dl, train=True)
     torch.save(model, './model.pt')
 
 model  = torch.load('./model.pt')
 test_dl = get_dl(np.arange(9, 11), H5_PATH, test=True)
 
-# TESTa n
 tot_loss = torch.zeros(1).to(device)
 bar = tqdm.tqdm(enumerate(test_dl))
 tot_auc = 0
 i = 0
 
 model.eval()
+
 with torch.no_grad():
     for n_batch, (x, y) in bar:
 
