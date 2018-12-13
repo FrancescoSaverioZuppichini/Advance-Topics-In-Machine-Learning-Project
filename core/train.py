@@ -17,8 +17,8 @@ BATCH_SIZE = 128
 N_WORKERS = 14
 H5_PATH = '/home/francesco/Desktop/carino/vaevictis/data_many_dist_fixed_step.h5'
 GROUP = np.arange(1)
-EPOCHES = 30
-TRAIN = True
+EPOCHES = 100
+TRAIN = False
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -55,10 +55,11 @@ class PerceptionDataset(Dataset):
 
         x, y = torch.from_numpy(x).float(), torch.from_numpy(y).float()
 
-        if self.transform is None:
-            x = x.permute(2,0,1)
-        else:
+        x = x.permute(2, 0, 1)
+
+        if self.transform is not None:
             x = self.transform(x)
+
 
         y[y > 0] = 1.0
 
@@ -105,19 +106,16 @@ class SimpleCNN(nn.Module):
         return x
 def get_dl(*args, **kwargs):
     ds = PerceptionDataset(*args, **kwargs)
-    dl = DataLoader(ds, batch_size=BATCH_SIZE, num_workers=N_WORKERS, drop_last=True)
+    dl = DataLoader(ds, batch_size=BATCH_SIZE, num_workers=N_WORKERS, drop_last=True, shuffle=not kwargs['test'])
 
     return dl
 
-if TRAIN: train_dl = get_dl(np.arange(0, 6), H5_PATH, transform=Compose([ToPILImage(),
-                                                                        RandomVerticalFlip(),
-                                                                        RandomHorizontalFlip(),
-                                                                        ToTensor()]))
+if TRAIN: train_dl = get_dl(np.arange(2, 8), H5_PATH, test=False)
 
 model = SimpleCNN().to(device)
 
 criterion = nn.MSELoss()
-optimizer = optim.Adam(model.parameters(), lr=0.01)
+optimizer = optim.Adam(model.parameters(), lr=0.0002)
 
 if TRAIN:
     # TRAIN
@@ -149,13 +147,15 @@ if TRAIN:
     torch.save(model, './model.pt')
 
 model  = torch.load('./model.pt')
-test_dl = get_dl(np.arange(9, 10), H5_PATH, test=True)
+test_dl = get_dl(np.arange(9, 11), H5_PATH, test=True)
 
 # TESTa n
 tot_loss = torch.zeros(1).to(device)
 bar = tqdm.tqdm(enumerate(test_dl))
 tot_auc = 0
 i = 0
+
+model.eval()
 with torch.no_grad():
     for n_batch, (x, y) in bar:
 
