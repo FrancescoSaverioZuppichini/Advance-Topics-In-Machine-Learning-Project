@@ -20,7 +20,7 @@ BATCH_SIZE = 128
 N_WORKERS = 14
 H5_PATH = '/home/francesco/Desktop/carino/vaevictis/data_many_dist_fixed_step.h5'
 GROUP = np.arange(1)
-EPOCHES = 100
+EPOCHES = 10
 TRAIN = False
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -107,22 +107,24 @@ def get_dl(*args, **kwargs):
     ds = PerceptionDataset(*args, **kwargs)
     dl = DataLoader(ds, batch_size=BATCH_SIZE, num_workers=N_WORKERS, drop_last=True, shuffle=not kwargs['test'])
 
-    return dl
+    return dl, ds
 
+if TRAIN: train_dl, _ = get_dl(np.arange(2, 8), H5_PATH, test=False)
 
 model = SimpleCNN().to(device)
 
 criterion = nn.MSELoss()
 optimizer = optim.Adam(model.parameters(), lr=0.0002)
 
-def run(dl, train=False):
+if TRAIN:
+    # TRAIN
     for epoch in range(EPOCHES):
         tot_loss = torch.zeros(1).to(device)
-        bar = tqdm.tqdm(enumerate(dl))
+        bar = tqdm.tqdm(enumerate(train_dl))
 
         for n_batch, (x, y) in bar:
 
-            if train: optimizer.zero_grad()
+            optimizer.zero_grad()
 
             x, y = x.to(device), y.to(device)
 
@@ -132,31 +134,38 @@ def run(dl, train=False):
             y_ = model(x)
             loss = criterion(y_ * mask, y * mask)
 
-            if train:
-                loss.backward()
-                optimizer.step()
+            loss.backward()
+
+            optimizer.step()
 
             with torch.no_grad():
                 tot_loss += loss
 
             bar.set_description('epoch={}, loss={:.4f}'.format(epoch, (tot_loss / (n_batch + 1)).cpu().item()))
-if TRAIN:
-    train_dl = get_dl(np.arange(2, 8), H5_PATH, test=False)
-    run(train_dl, train=True)
+
     torch.save(model, './model.pt')
 
 model  = torch.load('./model.pt')
-test_dl = get_dl(np.arange(9, 11), H5_PATH, test=True)
+test_dl, test_ds = get_dl(np.arange(9, 11), H5_PATH, test=True)
 
+# TESTa n
 tot_loss = torch.zeros(1).to(device)
 bar = tqdm.tqdm(enumerate(test_dl))
-tot_auc = 0
 i = 0
 
 model.eval()
 
-with torch.no_grad():
-    for n_batch, (x, y) in bar:
+distances = list(range(0, 65, 1))
+n_dist = len(distances)
+
+auc_array = []
+
+for i in range(10):
+    with torch.no_grad():
+        x, y = test_ds[i]
+
+        x, y = x.unsqueeze(0), y.unsqueeze(0),
+        accs = 0
 
         x, y = x.to(device), y.to(device)
 
@@ -169,22 +178,40 @@ with torch.no_grad():
         y = y.cpu().numpy()
 
         for y_1, y1 in zip(y_, y):
-            indices = np.where(y1)
+            y1 = np.expand_dims(y1, axis=0)
+            y_1 = np.expand_dims(y_1, axis=0)
 
-            y_1 = y_1[indices]
-            y1 = y1[indices]
-            try:
-                auc = roc_auc_score(y1, y_1)
-            except ValueError as e:
-                auc = 0.5
-            tot_auc += auc
-            i += 1
+            print(y1.shape, y_1.shape)
 
-print(i)
-print(len(test_dl))
+            aucs = np.zeros([n_dist, 5])
 
-print('auc={:.4f}'.format((tot_auc / i)))
-# print('epoch={}, loss={:.4f}'.format(epoch, (tot_loss / n_batch).cpu().item()))
-#     y_
-#
-# loss =
+            for i, d in enumerate(distances):
+                for j in range(5):
+                    indices = np.where(y1[:,i * 5 + j])
+
+                    yc_1 = y_1[indices, i * 5 + j]
+                    yc1 = y1[indices, i * 5 + j]
+                    try:
+                        auc = roc_auc_score(yc1, yc_1)
+                    except ValueError as e:
+                        auc = 0.5
+                    aucs[n_dist - 1 - i, j] = auc
+            break
+        auc_array.append(aucs)
+
+    # AUC MAP
+    mean_auc = np.mean(auc_array, axis=0)
+    std_auc = np.std(auc_array, axis=0)
+
+    dist_labels = ['%.0f' % d for d in np.flipud(distances)]
+    dist_labels = [d for i, d in enumerate(dist_labels) if i % 2 == 0]
+    colors = ['aqua', 'darkorange', 'deeppink', 'cornflowerblue', 'green']
+
+    fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(8, 8))
+    sns.heatmap(mean_auc * 100, cmap='gray', annot=True, vmin=50, vmax=100, annot_kws={"color": "white"})
+    ax.set_xticklabels(['left', '', 'center', '', 'right'])
+    ax.set_yticklabels(dist_labels, rotation=0)
+    plt.xlabel('Sensors')
+    plt.ylabel('Distance [cm]')
+    plt.title('Area Under the pReceiver Operating Characteristic Curve')
+    plt.show()
