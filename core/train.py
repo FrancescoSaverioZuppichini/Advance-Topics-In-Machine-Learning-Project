@@ -20,8 +20,8 @@ BATCH_SIZE = 128
 N_WORKERS = 14
 H5_PATH = '/home/francesco/Desktop/carino/vaevictis/data_many_dist_fixed_step.h5'
 GROUP = np.arange(1)
-EPOCHES = 10
-TRAIN = False
+EPOCHES = 20
+TRAIN = True
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -127,9 +127,10 @@ if TRAIN:
             optimizer.zero_grad()
 
             x, y = x.to(device), y.to(device)
+            print(x.shape)
+            mask = y != -1
 
-            mask = torch.ones(y.size()).to(device)
-            mask[y == -1] = 0
+            mask = mask.to(device).float()
 
             y_ = model(x)
             loss = criterion(y_ * mask, y * mask)
@@ -154,48 +155,57 @@ bar = tqdm.tqdm(enumerate(test_dl))
 i = 0
 
 model.eval()
+rng = np.random.RandomState(13)  # 13 lucky number
 
 distances = list(range(0, 65, 1))
 n_dist = len(distances)
 
 auc_array = []
 
-for i in range(10):
+for i in range(1):
     with torch.no_grad():
-        x, y = test_ds[i]
+        x, y = test_ds[500]
 
         x, y = x.unsqueeze(0), y.unsqueeze(0),
         accs = 0
 
         x, y = x.to(device), y.to(device)
 
-        mask = torch.ones(y.size()).to(device)
-        mask[y == -1] = 0
+        mask = y != -1
 
+        mask = mask.cpu().numpy()
+        # mask[y == -1] = 0
         y_ = model(x)
 
         y_ = y_.cpu().numpy()
         y = y.cpu().numpy()
 
-        for y_1, y1 in zip(y_, y):
-            y1 = np.expand_dims(y1, axis=0)
-            y_1 = np.expand_dims(y_1, axis=0)
+        print(mask.shape)
+        # for y_1, y1 in zip(y_, y):
+            # y1 = np.expand_dims(y1, axis=0)
+            # y_1 = np.expand_dims(y_1, axis=0)
 
-            print(y1.shape, y_1.shape)
+        aucs = np.zeros([n_dist, 5])
+        y_1 = y
+        y1=y_
+        for i, d in enumerate(distances):
+            for j in range(5):
+                print(mask[:,i * 5 + j])
+                indices = np.where(mask[i * 5 :  i * 5  +j])
+                print(indices, 'indices')
 
-            aucs = np.zeros([n_dist, 5])
+                yc_1 = y_1[indices, i * 5 + j]
+                yc1 = y1[indices, i * 5 + j]
 
-            for i, d in enumerate(distances):
-                for j in range(5):
-                    indices = np.where(y1[:,i * 5 + j])
-
-                    yc_1 = y_1[indices, i * 5 + j]
-                    yc1 = y1[indices, i * 5 + j]
-                    try:
-                        auc = roc_auc_score(yc1, yc_1)
-                    except ValueError as e:
-                        auc = 0.5
-                    aucs[n_dist - 1 - i, j] = auc
+                if len(indices[0]) > 0:
+                    indices = (rng.choice(indices[0], len(indices[0])),)
+                try:
+                    yc1, yc_1 = yc1.tolist()[0],  yc_1.tolist()[0]
+                    auc = roc_auc_score(yc1, yc_1)
+                    print(auc, 'ddddd')
+                except ValueError as e:
+                    auc = 0.5
+                aucs[n_dist - 1 - i, j] = auc
             break
         auc_array.append(aucs)
 
